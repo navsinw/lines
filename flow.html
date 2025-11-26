@@ -3,240 +3,569 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Flow Visualization — Video Overlays (Streamline / Pathline / Streakline)</title>
+  <title>Advanced Flow Visualization & Analysis — IIT KGP</title>
 
-  <!-- Tailwind for quick UI styles -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Three.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <!-- OpenCV (kept but async) -->
   <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
 
   <style>
-    :root { --panel-bg: rgba(18,23,28,0.55); --muted: #9ca3af; --accent:#10b981; }
-    html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial;background:#071226;color:#eaf6f9}
+    :root{--panel-bg:rgba(18,23,28,0.55);--accent:#10b981;--muted:#9ca3af}
+    html,body{height:100%;margin:0;padding:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;color:#e5eef1;background-color:#0b0f12}
+    .bg-photo{position:fixed;inset:0;background:linear-gradient(180deg,#0f4c81 0%,#1964b3 40%,#2b7fd6 100%);z-index:-3;filter:saturate(1.05) contrast(1.02)}
+    .bg-overlay{position:fixed;inset:0;z-index:-2;background:linear-gradient(180deg,rgba(4,18,36,0.18),rgba(3,16,30,0.28));pointer-events:none}
+    .bg-blur{position:fixed;inset:0;z-index:-1;backdrop-filter:blur(4px) brightness(0.95);-webkit-backdrop-filter:blur(4px) brightness(0.95);pointer-events:none;opacity:0.55}
     .app{max-width:1200px;margin:36px auto;padding:28px}
-    #visualization-container{position:relative;width:100%;height:62vh;min-height:480px;border-radius:12px;overflow:hidden;background:linear-gradient(180deg,rgba(7,18,34,0.18),rgba(7,12,24,0.36));box-shadow:0 10px 30px rgba(0,0,0,0.6)}
-    canvas#flow-canvas{width:100%;height:100%;display:block}
-
-    /* video overlays (appear when corresponding mode is selected) */
-    .viz-video {
-      position:absolute;
-      z-index:9;
-      right:5%;
-      top:6%;
-      width:36%;
-      max-width:520px;
-      border-radius:8px;
-      box-shadow:0 12px 40px rgba(0,0,0,0.6);
-      border:1px solid rgba(255,255,255,0.04);
-      display:none; /* toggled by JS */
-      pointer-events:none; /* clicks go through to UI */
-      transform: rotate(-4deg);
-      background:#000;
-      object-fit:cover;
-    }
-
-    /* small white dot for P if needed as HTML element (optional) */
-    .start-dot { position:absolute; left:10%; top:55%; width:10px; height:10px; border-radius:50%; background:#fff; z-index:11; display:none; }
-
-    /* control panel */
-    .controls{display:grid;grid-template-columns:1fr 420px;gap:18px;margin-top:18px}
-    .panel{background:var(--panel-bg);padding:16px;border-radius:12px}
-    .segmented{display:flex;gap:8px;background:rgba(255,255,255,0.02);padding:6px;border-radius:10px}
-    .segmented button{flex:1;padding:10px;border-radius:8px;border:none;background:transparent;color:var(--muted);cursor:pointer;font-weight:700}
-    .segmented button.active{background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01));color:#071018}
-    .video-panel input[type="file"]{width:100%}
-
-    @media (max-width:1000px){
-      .viz-video{ display:none !important; }
-      .controls{grid-template-columns:1fr}
-    }
+    header{display:flex;align-items:center;gap:16px;margin-bottom:18px} header h1{font-weight:800;font-size:1.6rem;color:#fff;letter-spacing:-0.3px}
+    #header-logo{width:52px;height:52px;border-radius:8px;object-fit:contain;background:#07223a;padding:6px;border:1px solid rgba(255,255,255,0.04)}
+    #visualization-container{position:relative;width:100%;height:62vh;min-height:480px;border-radius:14px;overflow:hidden;box-shadow:0 10px 30px rgba(2,6,10,0.7);border:1px solid rgba(255,255,255,0.04);background:linear-gradient(180deg,rgba(7,18,34,0.18),rgba(7,12,24,0.36));display:flex;align-items:center;justify-content:center}
+    #flow-canvas{width:100%;height:100%;display:block}
+    .controls{margin-top:18px;display:grid;grid-template-columns:1fr 400px;gap:18px;align-items:start}
+    .panel{background:var(--panel-bg);padding:16px;border-radius:12px;border:1px solid rgba(255,255,255,0.04);box-shadow:0 8px 24px rgba(2,6,10,0.6)}
+    .segmented{display:flex;gap:8px;background:rgba(255,255,255,0.02);padding:6px;border-radius:10px;align-items:center}
+    .segmented button{flex:1;border:none;background:transparent;color:var(--muted);padding:10px 12px;border-radius:8px;font-weight:600;display:flex;gap:10px;align-items:center;justify-content:center;cursor:pointer;transition:all 180ms ease;border:1px solid transparent}
+    .segmented button svg{width:18px;height:18px;opacity:0.9}
+    .segmented button.active{background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01));color:#0d1117;box-shadow:0 6px 18px rgba(16,185,129,0.12),inset 0 -2px 0 rgba(0,0,0,0.25);border:1px solid rgba(6,120,87,0.12)}
+    .segmented button:hover{transform:translateY(-2px);color:#fff}
+    .segment-label{font-size:0.95rem;display:inline-block}
+    .row{display:flex;gap:10px;align-items:center;margin-top:10px}
+    .slider-label{display:flex;justify-content:space-between;align-items:center;font-size:0.86rem;color:var(--muted);margin-bottom:6px}
+    input[type="range"]{width:100%}
+    .actions{display:flex;gap:8px;margin-top:12px}
+    .btn{flex:1;padding:10px 12px;border-radius:10px;border:none;cursor:pointer;font-weight:700;letter-spacing:0.2px;transition:transform 160ms ease,box-shadow 160ms ease}
+    .btn:active{transform:translateY(1px)}
+    .btn-primary{background:linear-gradient(90deg,var(--accent),#059669);color:#071018;box-shadow:0 8px 24px rgba(16,185,129,0.12)}
+    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
+    .video-panel{display:flex;flex-direction:column;gap:10px}
+    input[type="file"]{background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;color:#e6eef1;border:1px solid rgba(255,255,255,0.03)}
+    #analysis-output{margin-top:14px;padding:12px;border-radius:10px;background:rgba(0,0,0,0.35);display:none;color:#dbe8ea;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,"Roboto Mono",monospace;font-size:0.92rem;white-space:pre-wrap}
+    @media (max-width:980px){.controls{grid-template-columns:1fr} #visualization-container{height:56vh;min-height:420px} .video-panel{order:3}}
   </style>
 </head>
 <body>
+
+  <div class="bg-photo" aria-hidden="true"></div>
+  <div class="bg-overlay" aria-hidden="true"></div>
+  <div class="bg-blur" aria-hidden="true"></div>
+
   <div class="app">
-    <header class="flex items-center gap-4 mb-4">
-      <img src="https://upload.wikimedia.org/wikipedia/en/thumb/1/1c/IIT_Kharagpur_Logo.svg/1200px-IIT_Kharagpur_Logo.svg.png" alt="logo" style="width:52px;height:52px;background:#07223a;padding:6px;border-radius:8px">
+    <header>
+      <img id="header-logo" src="https://upload.wikimedia.org/wikipedia/en/thumb/1/1c/IIT_Kharagpur_Logo.svg/1200px-IIT_Kharagpur_Logo.svg.png" alt="IIT KGP Logo" onerror="this.onerror=null; this.src='https://placehold.co/52x52/07223a/eee?text=KGP'">
       <div>
-        <h1 style="margin:0;font-size:1.3rem">Flow Visualization — Video Overlays</h1>
-        <p style="margin:0;color:var(--muted)">Streamline · Pathline · Streakline — use videos as visual references</p>
+        <h1>IIT Kharagpur — Flow Analysis Tool</h1>
+        <p style="margin:0;font-size:0.88rem;color:var(--muted)">Streamline · Pathline · Streakline • Video-based PIV (OpenCV.js)</p>
       </div>
     </header>
 
-    <!-- Visualization area -->
     <div id="visualization-container">
       <canvas id="flow-canvas"></canvas>
-
-      <!-- Video overlays (place your mp4 files in images/ folder) -->
-      <!-- IMPORTANT: update these src paths if you place videos somewhere else -->
-      <video id="video-streamline" class="viz-video" src="images/streamline.mp4" muted playsinline preload="metadata" loop></video>
-      <video id="video-pathline"   class="viz-video" src="images/pathline.mp4"   muted playsinline preload="metadata" loop></video>
-      <video id="video-streakline" class="viz-video" src="images/streakline.mp4" muted playsinline preload="metadata" loop></video>
-
-      <!-- optional small start point dot marker -->
-      <div id="start-dot" class="start-dot"></div>
+      <img id="iitkgp-logo" src="https://upload.wikimedia.org/wikipedia/en/thumb/1/1c/IIT_Kharagpur_Logo.svg/1200px-IIT_Kharagpur_Logo.svg.png" alt="logo" style="position:absolute;bottom:14px;right:14px;width:110px;opacity:0.12;mix-blend-mode:overlay;filter:grayscale(60%)">
+      <div style="position:absolute;left:14px;top:14px;color:rgba(255,255,255,0.9);font-size:0.84rem;background:rgba(0,0,0,0.12);padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);">
+        3D Simulation • <span id="sim-state">Initializing...</span>
+      </div>
     </div>
 
-    <!-- Controls -->
     <div class="controls">
       <div class="panel">
-        <h3 style="margin:0 0 8px 0">Visualization Mode</h3>
+        <h2 style="margin:0;font-weight:800;color:#fff">Visualization Mode</h2>
+        <p style="margin:6px 0 12px;color:var(--muted);font-size:0.9rem">Choose the flow visualization type (click to change)</p>
 
-        <div class="segmented" role="tablist" aria-label="modes">
-          <button id="mode-streamline" data-mode="streamline" class="active">Streamline</button>
-          <button id="mode-pathline" data-mode="pathline">Pathline</button>
-          <button id="mode-streakline" data-mode="streakline">Streakline</button>
+        <div class="segmented" role="tablist" aria-label="Visualization modes">
+          <button id="mode-streamline" data-mode="streamline" class="active" title="Streamline">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12c4-6 10-6 14-6s4 2 4 6c0 4-2 6-6 6s-8-6-12-6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="segment-label label">Streamline</span>
+          </button>
+
+          <button id="mode-pathline" data-mode="pathline" title="Pathline">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 16c4-8 8-8 12-8s6 4 6 8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="segment-label label">Pathline</span>
+          </button>
+
+          <button id="mode-streakline" data-mode="streakline" title="Streakline">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 12c6-8 10-8 16-8M4 12c6 8 10 8 16 8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="segment-label label">Streakline</span>
+          </button>
         </div>
 
-        <div style="margin-top:12px">
-          <label style="display:flex;justify-content:space-between;align-items:center;color:var(--muted)">
-            <span>Unsteadiness</span><span id="unsteadiness-value" style="font-family:monospace">0.00</span>
-          </label>
-          <input id="unsteadiness-slider" type="range" min="0" max="0.5" step="0.01" value="0.0" style="width:100%">
-        </div>
-
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <button id="reset-sim" class="px-3 py-2 bg-gray-700 rounded text-white">Reset</button>
-          <button id="pause-sim" class="px-3 py-2 bg-gray-700 rounded text-white">Pause</button>
-          <button id="snapshot" class="px-3 py-2 bg-gray-700 rounded text-white">Snapshot</button>
+        <div style="margin-top:14px;">
+          <div class="slider-label"><span>Unsteadiness</span><span id="unsteadiness-value" style="font-family:ui-monospace,monospace;color:#a7f3d0">0.00</span></div>
+          <input id="unsteadiness-slider" type="range" min="0" max="0.5" step="0.01" value="0.0">
+          <div class="row">
+            <button id="reset-sim" class="btn btn-ghost">Reset Tracers</button>
+            <button id="pause-sim" class="btn btn-ghost">Pause</button>
+            <button id="export-snapshot" class="btn btn-ghost">Snapshot</button>
+          </div>
         </div>
       </div>
 
-      <div class="panel">
-        <h3 style="margin:0 0 8px 0">Video Flow Analysis</h3>
-        <p style="margin:0 0 8px 0;color:var(--muted)">You can still upload a video for PIV processing (unchanged).</p>
-        <input id="image-upload" type="file" accept="video/*">
-        <div style="display:flex;gap:8px;margin-top:10px">
-          <button id="process-btn" class="px-3 py-2 bg-green-600 rounded text-black">Process Video</button>
-          <button id="draw-btn" class="px-3 py-2 bg-gray-700 rounded text-white" disabled>Draw Visuals</button>
+      <div class="panel video-panel">
+        <h3 style="margin:0;font-weight:800;color:#fff">Video Flow Analysis</h3>
+        <p style="margin:6px 0 8px;color:var(--muted);font-size:0.9rem">Upload a short video (MP4/WEBM). We'll extract frames and compute optical flow.</p>
+
+        <input type="file" id="image-upload" accept="video/*">
+        <div class="actions">
+          <button id="process-btn" class="btn btn-primary">Process Video</button>
+          <button id="draw-btn" class="btn btn-ghost" disabled>Draw Visuals</button>
         </div>
 
-        <div id="analysis-output" style="display:none;margin-top:12px;background:rgba(0,0,0,0.2);padding:8px;border-radius:6px;color:#dbe8ea;font-family:monospace"></div>
+        <div id="analysis-output" style="display:none;margin-top:8px;border-radius:8px;padding:8px;background:rgba(0,0,0,0.36);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <strong style="color:#9be7c6">Analysis Report</strong>
+            <small style="color:var(--muted)"><span id="frames-count">0</span> frames</small>
+          </div>
+          <pre id="analysis-text" style="margin:0;font-size:0.82rem;color:#dcefe9;max-height:160px;overflow:auto;"></pre>
+          <canvas id="flow2d-canvas" style="margin-top:8px;border-radius:8px;width:100%;display:block;border:1px solid rgba(255,255,255,0.03)"></canvas>
+        </div>
       </div>
     </div>
+
+    <hr style="margin:24px 0;border-color:rgba(255,255,255,0.03)">
+
+    <div class="panel" style="margin-top:0;">
+      <h3 style="margin:0 0 8px 0;color:#ffdd57">I. Experiment Guide (PIV/PTV)</h3>
+      <ol style="margin:0;color:var(--muted);font-size:0.92rem">
+        <li>Use neutrally-buoyant seeding (&lt;&lt;50 μm) and illuminate a thin plane (laser sheet).</li>
+        <li>Record at stable FPS with a reference ruler in the frame.</li>
+        <li>Higher contrast and minimal out-of-plane motion give better optical flow results.</li>
+      </ol>
+    </div>
+
   </div>
 
 <script>
-/* -----------------------
-   Simple Three.js demo (keeps the original behavior)
-   plus the new video-overlay wiring
-   ----------------------- */
+/* UI bindings */
+const modeButtons = {
+  streamline: document.getElementById('mode-streamline'),
+  pathline: document.getElementById('mode-pathline'),
+  streakline: document.getElementById('mode-streakline')
+};
+const unsteadinessSlider = document.getElementById('unsteadiness-slider');
+const unsteadinessValue = document.getElementById('unsteadiness-value');
+const resetBtn = document.getElementById('reset-sim');
+const pauseBtn = document.getElementById('pause-sim');
+const exportBtn = document.getElementById('export-snapshot');
+const processBtn = document.getElementById('process-btn');
+const drawBtn = document.getElementById('draw-btn');
+const analysisOutput = document.getElementById('analysis-output');
+const analysisText = document.getElementById('analysis-text');
+const framesCountEl = document.getElementById('frames-count');
+const flow2dCanvas = document.getElementById('flow2d-canvas');
+const simStateEl = document.getElementById('sim-state');
 
+let scene, camera, renderer, clock;
+let currentMode = 'streamline';
+let tracers = [];
+let injectionPoint = new THREE.Vector2(0,0);
+let unsteadinessFactor = 0.0;
+let frameRateCapture = 15;
 const container = document.getElementById('visualization-container');
 const canvas3d = document.getElementById('flow-canvas');
 
-let scene, camera, renderer, clock;
+unsteadinessSlider.addEventListener('input', (e)=> {
+  unsteadinessFactor = parseFloat(e.target.value);
+  unsteadinessValue.textContent = unsteadinessFactor.toFixed(2);
+});
+
+Object.values(modeButtons).forEach(b => {
+  b.addEventListener('click', () => {
+    const newMode = b.dataset.mode;
+    if(newMode === currentMode) return;
+    Object.values(modeButtons).forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    currentMode = newMode;
+    resetTracers();
+    simStateEl.textContent = currentMode;
+  });
+});
+
+/* --- Three.js scene init --- */
 function initThree(){
-  scene = new THREE.Scene(); scene.background = new THREE.Color(0x071226);
-  clock = new THREE.Clock();
-  onResize();
-  renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias:true, alpha:true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1.5, 2));
+  scene = new THREE.Scene(); scene.background = new THREE.Color(0x071226); clock = new THREE.Clock();
+  onResize(); window.addEventListener('resize', onResize);
+  renderer = new THREE.WebGLRenderer({canvas: canvas3d, antialias:true, alpha:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1.5, 2));
   renderer.setSize(container.clientWidth, container.clientHeight);
-  window.addEventListener('resize', onResize);
+  // create initial tracer
+  tracers = [ new Particle(0,0,0) ];
   animate();
 }
+
 function onResize(){
-  const w = container.clientWidth, h = container.clientHeight;
-  const aspect = w/h;
-  const size = 10;
+  const w = container.clientWidth, h = container.clientHeight; const aspect = w/h; const size=10;
   camera = new THREE.OrthographicCamera(-size*aspect, size*aspect, size, -size, 0.1, 100);
-  camera.position.z = 10;
-  camera.updateProjectionMatrix();
+  camera.position.z = 10; camera.updateProjectionMatrix();
   if(renderer) renderer.setSize(w,h);
 }
-function animate(){
-  requestAnimationFrame(animate);
-  renderer && renderer.render(scene, camera);
-}
-window.addEventListener('load', initThree);
 
-/* -----------------------
-   Video overlay elements (use your mp4 files in images/)
-   ----------------------- */
-const vidStream = document.getElementById('video-streamline');
-const vidPath   = document.getElementById('video-pathline');
-const vidStreak = document.getElementById('video-streakline');
-
-function hideAllRefVideos(){
-  [vidStream, vidPath, vidStreak].forEach(v=>{
-    try {
-      v.pause();
-      v.currentTime = 0;
-    } catch(e) {}
-    v.style.display = 'none';
-  });
+/* velocity field (kept from original) */
+function velocityField(x,y,t){
+  const A = 1.0, K=0.05;
+  let vx_rot = -A*y, vy_rot = A*x;
+  const C = unsteadinessFactor*0.5, D = unsteadinessFactor*0.5;
+  let vx_time = C*Math.sin(t/10), vy_time = D*Math.cos(t/8);
+  let sink_x = 3, sink_y = 3;
+  let dx = x - sink_x, dy = y - sink_y;
+  let r_sq = dx*dx + dy*dy; if(r_sq<0.1) r_sq=0.1;
+  let vx_sink = -K*dx/r_sq, vy_sink = -K*dy/r_sq;
+  return new THREE.Vector2((vx_rot+vx_time+vx_sink)*0.08,(vy_rot+vy_time+vy_sink)*0.08);
 }
 
-// Show the video for the active mode, autoplay muted, loop
-function showRefVideoForMode(mode){
-  hideAllRefVideos();
-  if(mode === 'streamline'){
-    vidStream.style.display = 'block';
-    // autoplay - muted required on many browsers for autoplay
-    vidStream.muted = true;
-    vidStream.play().catch(()=>{/* play failed, user gesture needed */});
-  } else if(mode === 'pathline'){
-    vidPath.style.display = 'block';
-    vidPath.muted = true; vidPath.play().catch(()=>{});
-  } else if(mode === 'streakline'){
-    vidStreak.style.display = 'block';
-    vidStreak.muted = true; vidStreak.play().catch(()=>{});
+class Particle{
+  constructor(x,y,birthTime){
+    this.position = new THREE.Vector2(x,y);
+    this.history = [this.position.clone()];
+    this.birthTime = birthTime || (clock?clock.getElapsedTime():0);
+    this.maxHistory = 1000;
+    const g = new THREE.CircleGeometry(0.12,12);
+    const m = new THREE.MeshBasicMaterial({color:0xffffff});
+    this.point = new THREE.Mesh(g,m);
+    this.point.position.set(x,y,0);
+    scene.add(this.point);
+    this.line = null;
+  }
+  update(dt,t){
+    const V = velocityField(this.position.x,this.position.y,t);
+    this.position.add(V.clone().multiplyScalar(dt));
+    this.point.position.set(this.position.x,this.position.y,0);
+    if(currentMode==='pathline'){
+      this.history.push(this.position.clone());
+      if(this.history.length>this.maxHistory) this.history.shift();
+    }
   }
 }
 
-// start with streamline visible
-hideAllRefVideos();
-vidStream.style.display = 'block';
-
-/* -----------------------
-   UI wiring for mode buttons
-   ----------------------- */
-const btnStream = document.getElementById('mode-streamline');
-const btnPath   = document.getElementById('mode-pathline');
-const btnStreak = document.getElementById('mode-streakline');
-const modeButtons = [btnStream, btnPath, btnStreak];
-
-let currentMode = 'streamline';
-function setMode(newMode){
-  if(newMode === currentMode) return;
-  currentMode = newMode;
-  modeButtons.forEach(b => b.classList.remove('active'));
-  ({streamline:btnStream, pathline:btnPath, streakline:btnStreak})[newMode].classList.add('active');
-  // show corresponding reference video
-  showRefVideoForMode(currentMode);
-  // other existing behavior: reset tracers, redraw etc.
-  // resetTracers(); // if you have this function in your app, call it here
+/* utility: create label sprite (canvas -> texture -> sprite) */
+function makeLabelSprite(text, options = {}) {
+  const font = options.font || "28px Arial";
+  const fillStyle = options.fillStyle || "rgb(220,40,40)"; // red-ish
+  const border = options.border || 6;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = font;
+  // measure
+  const metrics = ctx.measureText(text);
+  const textWidth = Math.ceil(metrics.width);
+  const textHeight = Math.ceil(parseInt(font,10));
+  canvas.width = textWidth + border * 2;
+  canvas.height = textHeight + border * 2;
+  // render (transparent background)
+  ctx.font = font;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  // optional faint halo for legibility
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = 6;
+  ctx.fillStyle = fillStyle;
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+  const sprite = new THREE.Sprite(material);
+  // scale sprite so it looks constant-ish in scene
+  const scale = options.scale || 0.9;
+  sprite.scale.set(canvas.width * 0.01 * scale, canvas.height * 0.01 * scale, 1);
+  return sprite;
 }
 
-btnStream.addEventListener('click', ()=> setMode('streamline'));
-btnPath.addEventListener('click', ()=> setMode('pathline'));
-btnStreak.addEventListener('click', ()=> setMode('streakline'));
+/* remove any previously added flowSegment objects (including labels & dot) */
+function clearFlowSegments(){
+  const toRemove = [];
+  scene.traverse(c => {
+    if(c.userData && c.userData.flowSegment) toRemove.push(c);
+  });
+  toRemove.forEach(o => { if(o.geometry) o.geometry.dispose?.(); if(o.material && o.material.map) o.material.map.dispose?.(); scene.remove(o); });
+}
 
-/* -----------------------
-   Slider for unsteadiness (keeps same behavior)
-   ----------------------- */
-const slider = document.getElementById('unsteadiness-slider');
-const uval = document.getElementById('unsteadiness-value');
-slider.addEventListener('input', (e)=>{ uval.textContent = parseFloat(e.target.value).toFixed(2); /* update simulation variable */ });
+/* draw decorative pathline leaf shapes + labels A/B/C and start dot P */
+function drawDecorativePathline(t){
+  clearFlowSegments();
 
-/* -----------------------
-   Snapshot button (captures canvas only)
-   ----------------------- */
-document.getElementById('snapshot').addEventListener('click', ()=>{
-  try{
+  // Starting point P
+  const P = new THREE.Vector3(-8, -2, 0);
+  // show small white dot
+  const dotGeom = new THREE.CircleGeometry(0.12, 16);
+  const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const dotMesh = new THREE.Mesh(dotGeom, dotMat);
+  dotMesh.position.copy(P);
+  dotMesh.userData.flowSegment = true;
+  scene.add(dotMesh);
+
+  // define three end points (rough positions) to match leaf stacking
+  const endPoints = [
+    new THREE.Vector3(8.5, 5.5, 0),   // top (A)
+    new THREE.Vector3(9.5, 4.0, 0),   // middle (B)
+    new THREE.Vector3(10.5, 3.0, 0)   // bottom (C)
+  ];
+
+  // colors and thickness for the three outer curves (A,B,C)
+  const outerColors = [0xF1C40F, 0x8CE7CC, 0xF3B28B]; // gold, mint, peach
+  const outerWidth = [0.012, 0.012, 0.012];
+
+  // create 3 nested leafs. For each: an upper quadratic and a lower quadratic
+  const labels = ['A','B','C'];
+  for(let i=0;i<endPoints.length;i++){
+    const E = endPoints[i];
+    // control points to shape leaf (upper and lower)
+    const ctrlUp = new THREE.Vector3((P.x + E.x)/2, Math.max(P.y, E.y) + 3.2 - i*0.9, 0);
+    const ctrlDown = new THREE.Vector3((P.x + E.x)/2, Math.min(P.y, E.y) - 1.6 + i*0.2, 0);
+
+    // upper curve
+    const curveUp = new THREE.QuadraticBezierCurve3(P.clone(), ctrlUp, E.clone());
+    const ptsUp = curveUp.getPoints(120);
+    const geomUp = new THREE.BufferGeometry().setFromPoints(ptsUp);
+    const matUp = new THREE.LineBasicMaterial({ color: outerColors[i], linewidth: 2.2, opacity: 0.95 });
+    const lineUp = new THREE.Line(geomUp, matUp);
+    lineUp.userData.flowSegment = true;
+    scene.add(lineUp);
+
+    // lower curve
+    const curveDown = new THREE.QuadraticBezierCurve3(P.clone(), ctrlDown, E.clone());
+    const ptsDown = curveDown.getPoints(120);
+    const geomDown = new THREE.BufferGeometry().setFromPoints(ptsDown);
+    const matDown = new THREE.LineBasicMaterial({ color: 0x2e8b57, linewidth: 1.6, opacity: 0.9 });
+    const lineDown = new THREE.Line(geomDown, matDown);
+    lineDown.userData.flowSegment = true;
+    scene.add(lineDown);
+
+    // add a slender interior guide line (like narrow rays)
+    const guidePt = ptsUp[Math.floor(ptsUp.length * 0.35)];
+    const geomGuide = new THREE.BufferGeometry().setFromPoints([P.clone(), new THREE.Vector3(guidePt.x, guidePt.y, 0)]);
+    const guideMat = new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.18 });
+    const guide = new THREE.Line(geomGuide, guideMat);
+    guide.userData.flowSegment = true;
+    scene.add(guide);
+
+    // Create label sprite near the upper curve (slight offset outward)
+    const labelText = labels[i];
+    const labelSprite = makeLabelSprite(labelText, { font: "36px Arial", fillStyle: "rgb(220,40,40)", scale: 1.0 });
+    // place label at ~60-70% along the upper curve
+    const labelIndex = Math.min(ptsUp.length-1, Math.floor(ptsUp.length * 0.62));
+    const labelPos = ptsUp[labelIndex];
+    // offset a bit outward (normal direction approx)
+    const nextIndex = Math.min(ptsUp.length-1, labelIndex + 4);
+    const prevIndex = Math.max(0, labelIndex - 4);
+    const dir = new THREE.Vector3(ptsUp[nextIndex].x - ptsUp[prevIndex].x, ptsUp[nextIndex].y - ptsUp[prevIndex].y, 0).normalize();
+    // perpendicular to dir
+    const perp = new THREE.Vector3(-dir.y, dir.x, 0);
+    // position label slightly above curve
+    const labelWorld = new THREE.Vector3(labelPos.x, labelPos.y, 0).add(perp.multiplyScalar(0.5 + i*0.12));
+    labelSprite.position.copy(labelWorld);
+    labelSprite.userData.flowSegment = true;
+    scene.add(labelSprite);
+  }
+
+  // gentle S arc across top to hint the far arc
+  const arcCurve = new THREE.CubicBezierCurve3(
+    new THREE.Vector3(6,5,0),
+    new THREE.Vector3(8,6.3,0),
+    new THREE.Vector3(10,6.5,0),
+    new THREE.Vector3(12,6.6,0)
+  );
+  const apts = arcCurve.getPoints(120);
+  const ageom = new THREE.BufferGeometry().setFromPoints(apts);
+  const amat = new THREE.LineBasicMaterial({ color: 0xd1e9ff, opacity: 0.06 });
+  const al = new THREE.Line(ageom, amat);
+  al.userData.flowSegment = true;
+  scene.add(al);
+}
+
+/* clear and reset tracer objects */
+function resetTracers(){
+  clearFlowSegments();
+  tracers.forEach(t=>{ if(t.line) scene.remove(t.line); if(t.point) scene.remove(t.point); });
+  tracers = [];
+  if(currentMode==='pathline') {
+    // keep decorative pathlines for pathline mode
+    drawDecorativePathline(clock ? clock.getElapsedTime() : 0);
+  } else {
+    // create a seed tracer for other modes
+    tracers.push(new Particle(injectionPoint.x, injectionPoint.y, 0));
+  }
+}
+
+/* streamline drawing (kept) */
+function drawStreamlines3d(t){
+  clearFlowSegments();
+  const LINE_SPACING = 1.2, LINE_LENGTH = 0.5; const boundsX=camera.right, boundsY=camera.top;
+  for(let x=-boundsX+1;x<boundsX;x+=LINE_SPACING){
+    for(let y=-boundsY+1;y<boundsY;y+=LINE_SPACING){
+      const V2 = velocityField(x,y,t);
+      const V = new THREE.Vector3(V2.x, V2.y, 0).normalize().multiplyScalar(LINE_LENGTH/2);
+      const center = new THREE.Vector3(x,y,0);
+      const start = center.clone().sub(V);
+      const end = center.clone().add(V);
+      const geom=new THREE.BufferGeometry().setFromPoints([start,end]);
+      const mat=new THREE.LineBasicMaterial({color:0x4dd0e1});
+      const line=new THREE.Line(geom,mat);
+      line.userData.flowSegment=true;
+      scene.add(line);
+    }
+  }
+}
+
+/* tracers for streak/pathline mode (pathline is drawn decoratively above) */
+function drawTracers3d(dt,t){
+  if(currentMode === 'pathline'){
+    // decorative pathlines drawn once by drawDecorativePathline; to animate slightly we can rebuild every frame:
+    drawDecorativePathline(t);
+    return;
+  }
+  if(currentMode==='streakline'){ if(tracers.length===0 || (t - tracers[tracers.length-1].birthTime) > 0.1) tracers.push(new Particle(injectionPoint.x,injectionPoint.y)); }
+  if(currentMode==='streakline' && tracers.length>200){ const r=tracers.shift(); if(r.line) scene.remove(r.line); if(r.point) scene.remove(r.point); }
+  tracers.forEach(p=>{ p.update(dt,t); if(p.line) scene.remove(p.line); const pts=p.history.map(q=>new THREE.Vector3(q.x,q.y,0)); const geom=new THREE.BufferGeometry().setFromPoints(pts); const color = (currentMode==='pathline')?0xffd700:0x3cb371; p.line=new THREE.Line(geom,new THREE.LineBasicMaterial({color:color})); p.line.userData.flowSegment=true; scene.add(p.line); });
+}
+
+let isPaused = false;
+pauseBtn.addEventListener('click', ()=>{ isPaused = !isPaused; pauseBtn.textContent = isPaused ? 'Resume' : 'Pause'; });
+
+exportBtn.addEventListener('click', ()=>{
+  try {
     const data = canvas3d.toDataURL('image/png');
-    const a = document.createElement('a'); a.href = data; a.download = 'snapshot.png'; a.click();
-  }catch(e){ alert('Snapshot failed: '+e.message); }
+    const a = document.createElement('a'); a.href = data; a.download = 'flow_snapshot.png'; a.click();
+  } catch(e) { alert('Snapshot failed: '+e.message); }
 });
 
-/* -----------------------
-   Notes about PIV/OpenCV:
-   - In your project the existing PIV code can remain unchanged.
-   - This file only toggles overlay videos; your optical-flow processing will still use the user's uploaded file via the file input.
-   ----------------------- */
+function animate(){
+  requestAnimationFrame(animate);
+  if(!scene||!camera||!renderer) return;
+  if(isPaused) { renderer.render(scene,camera); return; }
+  const dt = clock.getDelta();
+  const t = clock.getElapsedTime();
+  if(currentMode==='streamline') drawStreamlines3d(t); else drawTracers3d(dt,t);
+  renderer.render(scene,camera);
+}
 
+window.addEventListener('load', initThree);
+
+/* --- OpenCV.js PIV/PTV code (unchanged from previous) --- */
+/* ... (omitted here to keep script compact) ... */
+/* For completeness, below is the important PIV code - same as earlier version. */
+
+function waitForCv(){ return new Promise(resolve=>{ if(window.cv && window.cv.Mat) return resolve(); const intv=setInterval(()=>{ if(window.cv && window.cv.Mat){ clearInterval(intv); resolve(); } },200); }); }
+
+async function extractFramesFromFile(file){
+  await new Promise(r=>setTimeout(r,10));
+  return new Promise((resolve,reject)=>{
+    const video = document.createElement('video'); video.preload='metadata'; video.muted=true; video.src = URL.createObjectURL(file);
+    const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d'); const frames=[];
+    video.onloadedmetadata = ()=>{
+      const duration = isFinite(video.duration) ? video.duration : 5; const fps = frameRateCapture; const total = Math.max(2, Math.floor(duration*fps)); let i=0;
+      function seekNext(){ if(i>=total){ resolve(frames); return;} video.currentTime = i / fps; }
+      video.onseeked = ()=>{ canvas.width = video.videoWidth; canvas.height = video.videoHeight; ctx.drawImage(video,0,0); frames.push(ctx.getImageData(0,0,canvas.width,canvas.height)); i++; seekNext(); };
+      seekNext();
+    };
+    video.onerror = (e)=>reject(e);
+  });
+}
+
+function computeFlowField(prevImg, nextImg){
+  const matA = cv.matFromImageData(prevImg); const matB = cv.matFromImageData(nextImg);
+  const gA = new cv.Mat(); const gB = new cv.Mat();
+  cv.cvtColor(matA,gA,cv.COLOR_RGBA2GRAY); cv.cvtColor(matB,gB,cv.COLOR_RGBA2GRAY);
+  const ksize = new cv.Size(5,5);
+  cv.GaussianBlur(gA, gA, ksize, 0);
+  cv.GaussianBlur(gB, gB, ksize, 0);
+
+  const flow = new cv.Mat();
+  cv.calcOpticalFlowFarneback(gA,gB,flow,0.5,3,15,3,5,1.2,0);
+  const mv = new cv.MatVector(); cv.split(flow,mv); const mx = mv.get(0); const my = mv.get(1);
+  const w = prevImg.width, h = prevImg.height; const u = new Float32Array(w*h); const v = new Float32Array(w*h);
+  for(let yy=0;yy<h;yy++){ for(let xx=0;xx<w;xx++){ const idx=yy*w+xx; u[idx]=mx.floatAt(yy,xx); v[idx]=my.floatAt(yy,xx); } }
+  for(let yy=1; yy<h-1; yy++){
+    for(let xx=1; xx<w-1; xx++){
+      const idx = yy*w+xx;
+      let su = 0, sv = 0, count = 0;
+      for(let oy=-1; oy<=1; oy++) for(let ox=-1; ox<=1; ox++){ const id2 = (yy+oy)*w + (xx+ox); su += u[id2]; sv += v[id2]; count++; }
+      u[idx] = su/count; v[idx] = sv/count;
+    }
+  }
+  matA.delete(); matB.delete(); gA.delete(); gB.delete(); flow.delete(); mv.delete(); mx.delete(); my.delete();
+  return {u,v,width:prevImg.width,height:prevImg.height};
+}
+
+let extractedFrames = [];
+let velocityFields = [];
+
+processBtn.addEventListener('click', async ()=>{
+  const file = document.getElementById('image-upload').files[0];
+  analysisOutput.style.display = 'block';
+  analysisText.textContent = 'Waiting for OpenCV.js...';
+  if(!file){ analysisText.textContent = 'Please upload a video file.'; return; }
+  processBtn.disabled = true; processBtn.textContent = 'Processing...';
+  await waitForCv();
+  analysisText.textContent = 'Extracting frames...';
+  try { extractedFrames = await extractFramesFromFile(file); } catch(e){ analysisText.textContent = 'Error extracting frames: '+(e.message||e); processBtn.disabled=false; processBtn.textContent='Process Video'; return; }
+  framesCountEl.textContent = extractedFrames.length;
+  analysisText.textContent = `Extracted ${extractedFrames.length} frames. Computing optical flow...`;
+  velocityFields = [];
+  for(let i=0;i<extractedFrames.length-1;i++){
+    analysisText.textContent = `Computing flow ${i+1}/${extractedFrames.length-1}...`;
+    await new Promise(r=>setTimeout(r,10));
+    const f = computeFlowField(extractedFrames[i],extractedFrames[i+1]);
+    velocityFields.push(f);
+  }
+  if(velocityFields.length>0) velocityFields.push(velocityFields[velocityFields.length-1]);
+  analysisText.textContent = `✔ Video processed. ${extractedFrames.length} frames extracted, ${velocityFields.length} flow fields computed.`;
+  processBtn.disabled=false; processBtn.textContent='Process Video'; drawBtn.disabled=false;
+});
+
+function sampleField(field,x,y){ const xi=Math.max(0,Math.min(field.width-1,Math.round(x))); const yi=Math.max(0,Math.min(field.height-1,Math.round(y))); const idx=yi*field.width+xi; return {u:field.u[idx], v:field.v[idx]}; }
+
+function integrateStreamline(field,x0,y0, ds=0.5, steps=500){
+  const pts=[{x:x0,y:y0}]; let x=x0,y=y0;
+  for(let i=0;i<steps;i++){
+    const k1=sampleField(field,x,y); const k1x=k1.u*ds, k1y=k1.v*ds;
+    const k2=sampleField(field,x+0.5*k1x,y+0.5*k1y); const k2x=k2.u*ds, k2y=k2.v*ds;
+    const k3=sampleField(field,x+0.5*k2x,y+0.5*k2y); const k3x=k3.u*ds, k3y=k3.v*ds;
+    const k4=sampleField(field,x+k3x,y+k3y); const k4x=k4.u*ds, k4y=k4.v*ds;
+    const dx=(k1x+2*k2x+2*k3x+k4x)/6; const dy=(k1y+2*k2y+2*k3y+k4y)/6;
+    x+=dx; y+=dy; if(x<0||y<0||x>=field.width||y>=field.height) break; if(Math.hypot(dx,dy)<0.01) break; pts.push({x,y});
+  }
+  return pts;
+}
+
+function computePathline(fields, x0,y0){
+  let x=x0,y=y0; const pts=[{x,y}]; const dt=1.0;
+  for(let t=0;t<fields.length;t++){
+    const f=fields[t]; const k1=sampleField(f,x,y); const k1x=k1.u*dt, k1y=k1.v*dt;
+    const k2=sampleField(f,x+0.5*k1x,y+0.5*k1y); const k2x=k2.u*dt, k2y=k2.v*dt;
+    const k3=sampleField(f,x+0.5*k2x,y+0.5*k2y); const k3x=k3.u*dt, k3y=k3.v*dt;
+    const k4=sampleField(f,x+k3x,y+k3y); const k4x=k4.u*dt, k4y=k4.v*dt;
+    const dx=(k1x+2*k2x+2*k3x+k4x)/6; const dy=(k1y+2*k2y+2*k3y+k4y)/6;
+    x+=dx; y+=dy; if(x<0||y<0||x>=f.width||y>=f.height) break; pts.push({x,y});
+  }
+  return pts;
+}
+
+function computeStreakline(fields, sx, sy, releaseInterval=1){
+  const currentIndex=fields.length-1; const positions=[]; const dt=1.0;
+  for(let tau=0;tau<=currentIndex;tau+=releaseInterval){
+    let x=sx,y=sy;
+    for(let t=tau;t<=currentIndex;t++){ const f=fields[t]; const vel=sampleField(f,x,y); x+=vel.u*dt; y+=vel.v*dt; if(x<0||y<0||x>=f.width||y>=f.height) break; }
+    positions.push({x,y});
+  }
+  return positions;
+}
+
+function drawVisuals(){
+  if(velocityFields.length===0){ analysisText.textContent='No computed velocity fields. Run processing first.'; return; }
+  const ctx = flow2dCanvas.getContext('2d'); const base = extractedFrames[0];
+  flow2dCanvas.width = base.width; flow2dCanvas.height = base.height; ctx.putImageData(base,0,0);
+  const mid = Math.floor(velocityFields.length/2); const field = velocityFields[mid]; ctx.lineWidth=1.5;
+  ctx.strokeStyle='rgba(255,80,70,0.95)';
+  const spacing = Math.floor(Math.max(10, field.width/30));
+  for(let y=spacing;y<field.height;y+=spacing){ for(let x=spacing;x<field.width;x+=spacing){ const pts=integrateStreamline(field,x,y,2,300); if(pts.length<2) continue; ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y); for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke(); } }
+  ctx.strokeStyle='rgba(80,220,130,0.95)';
+  const seeds=[ {x:Math.floor(field.width*0.2),y:Math.floor(field.height*0.5)}, {x:Math.floor(field.width*0.5),y:Math.floor(field.height*0.5)}, {x:Math.floor(field.width*0.8),y:Math.floor(field.height*0.5)} ];
+  seeds.forEach(s=>{ const pts=computePathline(velocityFields,s.x,s.y); if(pts.length<2) return; ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y); for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y); ctx.stroke(); });
+  ctx.strokeStyle='rgba(0,140,255,0.95)';
+  const srcX=Math.floor(field.width*0.1), srcY=Math.floor(field.height*0.5);
+  const spts=computeStreakline(velocityFields,srcX,srcY,1);
+  if(spts.length>0){ ctx.beginPath(); ctx.moveTo(spts[0].x,spts[0].y); for(let i=1;i<spts.length;i++) ctx.lineTo(spts[i].x,spts[i].y); ctx.stroke(); ctx.fillStyle='rgba(0,140,255,0.95)'; ctx.beginPath(); ctx.arc(srcX,srcY,4,0,Math.PI*2); ctx.fill(); }
+  analysisText.textContent = analysisText.textContent + "\n✔ Visuals drawn on 2D canvas. (Red=Streamline, Green=Pathline, Blue=Streakline)";
+}
+
+drawBtn.addEventListener('click', ()=>{ drawVisuals(); });
 </script>
 </body>
 </html>
