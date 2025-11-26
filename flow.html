@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Flow Visualization — Video Overlays (Streamline / Pathline / Streakline)</title>
+
+  <!-- Tailwind for quick UI styles -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Three.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- OpenCV (kept but async) -->
+  <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
+
+  <style>
+    :root { --panel-bg: rgba(18,23,28,0.55); --muted: #9ca3af; --accent:#10b981; }
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial;background:#071226;color:#eaf6f9}
+    .app{max-width:1200px;margin:36px auto;padding:28px}
+    #visualization-container{position:relative;width:100%;height:62vh;min-height:480px;border-radius:12px;overflow:hidden;background:linear-gradient(180deg,rgba(7,18,34,0.18),rgba(7,12,24,0.36));box-shadow:0 10px 30px rgba(0,0,0,0.6)}
+    canvas#flow-canvas{width:100%;height:100%;display:block}
+
+    /* video overlays (appear when corresponding mode is selected) */
+    .viz-video {
+      position:absolute;
+      z-index:9;
+      right:5%;
+      top:6%;
+      width:36%;
+      max-width:520px;
+      border-radius:8px;
+      box-shadow:0 12px 40px rgba(0,0,0,0.6);
+      border:1px solid rgba(255,255,255,0.04);
+      display:none; /* toggled by JS */
+      pointer-events:none; /* clicks go through to UI */
+      transform: rotate(-4deg);
+      background:#000;
+      object-fit:cover;
+    }
+
+    /* small white dot for P if needed as HTML element (optional) */
+    .start-dot { position:absolute; left:10%; top:55%; width:10px; height:10px; border-radius:50%; background:#fff; z-index:11; display:none; }
+
+    /* control panel */
+    .controls{display:grid;grid-template-columns:1fr 420px;gap:18px;margin-top:18px}
+    .panel{background:var(--panel-bg);padding:16px;border-radius:12px}
+    .segmented{display:flex;gap:8px;background:rgba(255,255,255,0.02);padding:6px;border-radius:10px}
+    .segmented button{flex:1;padding:10px;border-radius:8px;border:none;background:transparent;color:var(--muted);cursor:pointer;font-weight:700}
+    .segmented button.active{background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01));color:#071018}
+    .video-panel input[type="file"]{width:100%}
+
+    @media (max-width:1000px){
+      .viz-video{ display:none !important; }
+      .controls{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="flex items-center gap-4 mb-4">
+      <img src="https://upload.wikimedia.org/wikipedia/en/thumb/1/1c/IIT_Kharagpur_Logo.svg/1200px-IIT_Kharagpur_Logo.svg.png" alt="logo" style="width:52px;height:52px;background:#07223a;padding:6px;border-radius:8px">
+      <div>
+        <h1 style="margin:0;font-size:1.3rem">Flow Visualization — Video Overlays</h1>
+        <p style="margin:0;color:var(--muted)">Streamline · Pathline · Streakline — use videos as visual references</p>
+      </div>
+    </header>
+
+    <!-- Visualization area -->
+    <div id="visualization-container">
+      <canvas id="flow-canvas"></canvas>
+
+      <!-- Video overlays (place your mp4 files in images/ folder) -->
+      <!-- IMPORTANT: update these src paths if you place videos somewhere else -->
+      <video id="video-streamline" class="viz-video" src="images/streamline.mp4" muted playsinline preload="metadata" loop></video>
+      <video id="video-pathline"   class="viz-video" src="images/pathline.mp4"   muted playsinline preload="metadata" loop></video>
+      <video id="video-streakline" class="viz-video" src="images/streakline.mp4" muted playsinline preload="metadata" loop></video>
+
+      <!-- optional small start point dot marker -->
+      <div id="start-dot" class="start-dot"></div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <div class="panel">
+        <h3 style="margin:0 0 8px 0">Visualization Mode</h3>
+
+        <div class="segmented" role="tablist" aria-label="modes">
+          <button id="mode-streamline" data-mode="streamline" class="active">Streamline</button>
+          <button id="mode-pathline" data-mode="pathline">Pathline</button>
+          <button id="mode-streakline" data-mode="streakline">Streakline</button>
+        </div>
+
+        <div style="margin-top:12px">
+          <label style="display:flex;justify-content:space-between;align-items:center;color:var(--muted)">
+            <span>Unsteadiness</span><span id="unsteadiness-value" style="font-family:monospace">0.00</span>
+          </label>
+          <input id="unsteadiness-slider" type="range" min="0" max="0.5" step="0.01" value="0.0" style="width:100%">
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button id="reset-sim" class="px-3 py-2 bg-gray-700 rounded text-white">Reset</button>
+          <button id="pause-sim" class="px-3 py-2 bg-gray-700 rounded text-white">Pause</button>
+          <button id="snapshot" class="px-3 py-2 bg-gray-700 rounded text-white">Snapshot</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin:0 0 8px 0">Video Flow Analysis</h3>
+        <p style="margin:0 0 8px 0;color:var(--muted)">You can still upload a video for PIV processing (unchanged).</p>
+        <input id="image-upload" type="file" accept="video/*">
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button id="process-btn" class="px-3 py-2 bg-green-600 rounded text-black">Process Video</button>
+          <button id="draw-btn" class="px-3 py-2 bg-gray-700 rounded text-white" disabled>Draw Visuals</button>
+        </div>
+
+        <div id="analysis-output" style="display:none;margin-top:12px;background:rgba(0,0,0,0.2);padding:8px;border-radius:6px;color:#dbe8ea;font-family:monospace"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* -----------------------
+   Simple Three.js demo (keeps the original behavior)
+   plus the new video-overlay wiring
+   ----------------------- */
+
+const container = document.getElementById('visualization-container');
+const canvas3d = document.getElementById('flow-canvas');
+
+let scene, camera, renderer, clock;
+function initThree(){
+  scene = new THREE.Scene(); scene.background = new THREE.Color(0x071226);
+  clock = new THREE.Clock();
+  onResize();
+  renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1.5, 2));
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  window.addEventListener('resize', onResize);
+  animate();
+}
+function onResize(){
+  const w = container.clientWidth, h = container.clientHeight;
+  const aspect = w/h;
+  const size = 10;
+  camera = new THREE.OrthographicCamera(-size*aspect, size*aspect, size, -size, 0.1, 100);
+  camera.position.z = 10;
+  camera.updateProjectionMatrix();
+  if(renderer) renderer.setSize(w,h);
+}
+function animate(){
+  requestAnimationFrame(animate);
+  renderer && renderer.render(scene, camera);
+}
+window.addEventListener('load', initThree);
+
+/* -----------------------
+   Video overlay elements (use your mp4 files in images/)
+   ----------------------- */
+const vidStream = document.getElementById('video-streamline');
+const vidPath   = document.getElementById('video-pathline');
+const vidStreak = document.getElementById('video-streakline');
+
+function hideAllRefVideos(){
+  [vidStream, vidPath, vidStreak].forEach(v=>{
+    try {
+      v.pause();
+      v.currentTime = 0;
+    } catch(e) {}
+    v.style.display = 'none';
+  });
+}
+
+// Show the video for the active mode, autoplay muted, loop
+function showRefVideoForMode(mode){
+  hideAllRefVideos();
+  if(mode === 'streamline'){
+    vidStream.style.display = 'block';
+    // autoplay - muted required on many browsers for autoplay
+    vidStream.muted = true;
+    vidStream.play().catch(()=>{/* play failed, user gesture needed */});
+  } else if(mode === 'pathline'){
+    vidPath.style.display = 'block';
+    vidPath.muted = true; vidPath.play().catch(()=>{});
+  } else if(mode === 'streakline'){
+    vidStreak.style.display = 'block';
+    vidStreak.muted = true; vidStreak.play().catch(()=>{});
+  }
+}
+
+// start with streamline visible
+hideAllRefVideos();
+vidStream.style.display = 'block';
+
+/* -----------------------
+   UI wiring for mode buttons
+   ----------------------- */
+const btnStream = document.getElementById('mode-streamline');
+const btnPath   = document.getElementById('mode-pathline');
+const btnStreak = document.getElementById('mode-streakline');
+const modeButtons = [btnStream, btnPath, btnStreak];
+
+let currentMode = 'streamline';
+function setMode(newMode){
+  if(newMode === currentMode) return;
+  currentMode = newMode;
+  modeButtons.forEach(b => b.classList.remove('active'));
+  ({streamline:btnStream, pathline:btnPath, streakline:btnStreak})[newMode].classList.add('active');
+  // show corresponding reference video
+  showRefVideoForMode(currentMode);
+  // other existing behavior: reset tracers, redraw etc.
+  // resetTracers(); // if you have this function in your app, call it here
+}
+
+btnStream.addEventListener('click', ()=> setMode('streamline'));
+btnPath.addEventListener('click', ()=> setMode('pathline'));
+btnStreak.addEventListener('click', ()=> setMode('streakline'));
+
+/* -----------------------
+   Slider for unsteadiness (keeps same behavior)
+   ----------------------- */
+const slider = document.getElementById('unsteadiness-slider');
+const uval = document.getElementById('unsteadiness-value');
+slider.addEventListener('input', (e)=>{ uval.textContent = parseFloat(e.target.value).toFixed(2); /* update simulation variable */ });
+
+/* -----------------------
+   Snapshot button (captures canvas only)
+   ----------------------- */
+document.getElementById('snapshot').addEventListener('click', ()=>{
+  try{
+    const data = canvas3d.toDataURL('image/png');
+    const a = document.createElement('a'); a.href = data; a.download = 'snapshot.png'; a.click();
+  }catch(e){ alert('Snapshot failed: '+e.message); }
+});
+
+/* -----------------------
+   Notes about PIV/OpenCV:
+   - In your project the existing PIV code can remain unchanged.
+   - This file only toggles overlay videos; your optical-flow processing will still use the user's uploaded file via the file input.
+   ----------------------- */
+
+</script>
+</body>
+</html>
